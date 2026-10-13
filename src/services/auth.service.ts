@@ -84,3 +84,21 @@ export function changePassword(payload: ChangePasswordPayload): Promise<void> {
     errorMessage: "Could not change the password.",
   });
 }
+
+export interface UpdateProfilePayload {
+  email?: string;
+  business_name?: string;
+}
+
+export function updateProfile(payload: UpdateProfilePayload): Promise<User> {
+  return request(
+    {
+      service: "auth",
+      path: "/v1/auth/me",
+      method: "PATCH",
+      body: payload,
+      errorMessage: "Could not update your profile.",
+    },
+    UserSchema,
+  );
+}

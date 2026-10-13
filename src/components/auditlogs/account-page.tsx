@@ -3,7 +3,7 @@ import { useState } from "react";
 
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { useChangePassword, useMe } from "@/hooks/useAuthMutations";
+import { useChangePassword, useMe, useUpdateProfile } from "@/hooks/useAuthMutations";
 import { ApiError, errorMessage } from "@/lib/api-error";
 import { formatDate } from "@/lib/helpers";
 import { v, useValidatedForm, type Rules } from "@/lib/validation";
@@ -14,6 +14,18 @@ const passwordRules: Rules<PasswordValues> = {
   current_password: v.required("your current password"),
   new_password: v.required("a new password"),
   confirm: (value, all) => (value === all.new_password ? undefined : "The passwords do not match."),
+};
+
+type ProfileValues = { email: string; business_name: string };
+const profileRules: Rules<ProfileValues> = {
+  email: (value) =>
+    value.trim().length === 0
+      ? "Email is required."
+      : !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value.trim())
+        ? "Enter a valid email address."
+        : undefined,
+  business_name: (value) =>
+    value.trim().length < 2 ? "Business name must be at least 2 characters." : undefined,
 };
 
 function Row({ label, children }: { label: string; children: React.ReactNode }) {
@@ -27,7 +39,56 @@ function Row({ label, children }: { label: string; children: React.ReactNode }) 
 
 export function AccountPage() {
   const me = useMe();
+  const updateProfile = useUpdateProfile();
   const change = useChangePassword();
+
+  // ── profile edit state ────────────────────────────────────────────────
+  const [editing, setEditing] = useState(false);
+  const [profileFailure, setProfileFailure] = useState<string | null>(null);
+  const profileForm = useValidatedForm<ProfileValues>(
+    { email: "", business_name: "" },
+    profileRules,
+  );
+
+  function startEditing() {
+    if (!me.data) return;
+    const next: ProfileValues = { email: me.data.email, business_name: me.data.business_name };
+    profileForm.reset?.(next);
+    setProfileFailure(null);
+    setEditing(true);
+  }
+
+  function cancelEditing() {
+    setEditing(false);
+    setProfileFailure(null);
+  }
+
+  const submitProfile = profileForm.submit(async (values) => {
+    if (!me.data) return;
+    setProfileFailure(null);
+
+    // Only send fields that actually changed.
+    const payload: { email?: string; business_name?: string } = {};
+    if (values.email.trim() !== me.data.email) payload.email = values.email.trim();
+    if (values.business_name.trim() !== me.data.business_name)
+      payload.business_name = values.business_name.trim();
+
+    if (Object.keys(payload).length === 0) {
+      setEditing(false);
+      return;
+    }
+
+    try {
+      await updateProfile.mutateAsync(payload);
+      setEditing(false);
+    } catch (e) {
+      if (!(e instanceof ApiError && profileForm.applyServerErrors(e.fields))) {
+        setProfileFailure(errorMessage(e));
+      }
+    }
+  });
+
+  // ── password change state ─────────────────────────────────────────────
   const form = useValidatedForm<PasswordValues>(
     { current_password: "", new_password: "", confirm: "" },
     passwordRules,
@@ -60,26 +121,85 @@ export function AccountPage() {
         title="Account"
         description="Your sign-in details and the business you belong to."
       />
-      <Panel title="Profile" flush={!!me.data}>
+
+      {/* ── Profile panel ─────────────────────────────────────────────── */}
+      <Panel
+        title="Profile"
+        flush={!editing && !!me.data}
+        footer={
+          me.data ? (
+            editing ? (
+              <>
+                {profileFailure && (
+                  <p role="alert" className="mr-auto text-sm text-danger">
+                    {profileFailure}
+                  </p>
+                )}
+                <Button variant="outline" type="button" onClick={cancelEditing} disabled={updateProfile.isPending}>
+                  Cancel
+                </Button>
+                <Button type="submit" form="profile-form" disabled={updateProfile.isPending}>
+                  {updateProfile.isPending ? "Saving…" : "Save changes"}
+                </Button>
+              </>
+            ) : (
+              <Button variant="outline" type="button" onClick={startEditing}>
+                Edit profile
+              </Button>
+            )
+          ) : undefined
+        }
+      >
         {me.isLoading ? (
           <SkeletonRows rows={4} />
         ) : me.error ? (
           <InlineError message={errorMessage(me.error)} onRetry={() => me.refetch()} />
         ) : me.data ? (
-          <dl>
-            <Row label="Email">{me.data.email}</Row>
-            <Row label="Business">{me.data.business_name}</Row>
-            <Row label="Business ID">
-              <span className="flex items-center gap-1">
-                <Mono>{me.data.business_id}</Mono>
-                <CopyButton value={me.data.business_id} label="business id" />
-              </span>
-            </Row>
-            <Row label="Member since">{formatDate(me.data.created_at)}</Row>
-          </dl>
+          editing ? (
+            <form id="profile-form" noValidate onSubmit={submitProfile}>
+              <div className="grid max-w-md gap-4 px-5 py-4">
+                <Field label="Email" htmlFor="profile-email" error={profileForm.error("email")}>
+                  <Input
+                    id="profile-email"
+                    name="email"
+                    type="email"
+                    autoComplete="email"
+                    {...profileForm.bind("email")}
+                    onChange={(e) => profileForm.set("email", e.target.value)}
+                  />
+                </Field>
+                <Field
+                  label="Business name"
+                  htmlFor="profile-business"
+                  error={profileForm.error("business_name")}
+                >
+                  <Input
+                    id="profile-business"
+                    name="business_name"
+                    type="text"
+                    {...profileForm.bind("business_name")}
+                    onChange={(e) => profileForm.set("business_name", e.target.value)}
+                  />
+                </Field>
+              </div>
+            </form>
+          ) : (
+            <dl>
+              <Row label="Email">{me.data.email}</Row>
+              <Row label="Business">{me.data.business_name}</Row>
+              <Row label="Business ID">
+                <span className="flex items-center gap-1">
+                  <Mono>{me.data.business_id}</Mono>
+                  <CopyButton value={me.data.business_id} label="business id" />
+                </span>
+              </Row>
+              <Row label="Member since">{formatDate(me.data.created_at)}</Row>
+            </dl>
+          )
         ) : null}
       </Panel>
 
+      {/* ── Change password panel ──────────────────────────────────────── */}
       <form noValidate onSubmit={submit}>
         <Panel
           title="Change password"
@@ -152,3 +272,4 @@ export function AccountPage() {
     </div>
   );
 }
+

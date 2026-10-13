@@ -2,7 +2,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useRouter } from "@tanstack/react-router";
 
 import { keys } from "@/hooks/useAudit";
-import { changePassword, fetchMe, login, logout, register } from "@/services/auth.service";
+import { changePassword, fetchMe, login, logout, register, updateProfile } from "@/services/auth.service";
 
 export function useLogin() {
   const qc = useQueryClient();
@@ -40,5 +40,13 @@ export function useChangePassword() {
       qc.clear();
       return router.navigate({ to: "/login", search: { reason: "password-changed" } });
     },
+  });
+}
+
+export function useUpdateProfile() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: updateProfile,
+    onSuccess: () => qc.invalidateQueries({ queryKey: keys.me }),
   });
 }
