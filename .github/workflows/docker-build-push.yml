@@ -71,6 +71,7 @@ jobs:
           sbom: true
 
       - name: Run Trivy vulnerability scanner
+        if: success()
         uses: aquasecurity/trivy-action@master
         with:
           image-ref: ${{ secrets.DOCKER_USERNAME }}/auditlogs-ui:latest
@@ -79,12 +80,13 @@ jobs:
           severity: 'CRITICAL,HIGH'
 
       - name: Upload Trivy results to GitHub Security
-        uses: github/codeql-action/upload-sarif@v3
-        if: always()
+        uses: github/codeql-action/upload-sarif@v4
+        if: success() && hashFiles('trivy-results.sarif')
         with:
           sarif_file: 'trivy-results.sarif'
 
       - name: Generate SBOM
+        if: success()
         uses: anchore/sbom-action@v0
         with:
           image: ${{ secrets.DOCKER_USERNAME }}/auditlogs-ui:latest
@@ -92,6 +94,7 @@ jobs:
           output-file: sbom.spdx.json
 
       - name: Upload SBOM as artifact
+        if: success() && hashFiles('sbom.spdx.json')
         uses: actions/upload-artifact@v4
         with:
           name: sbom

@@ -25,12 +25,6 @@ WORKDIR /app
 # Copy built application from builder
 COPY --from=builder /build /app
 
-# Create non-root user
-RUN addgroup --system --gid 1001 nodejs && \
-    adduser --system --uid 1001 bun
-
-USER bun:bun
-
 ENV PORT=3000
 EXPOSE 3000
 
