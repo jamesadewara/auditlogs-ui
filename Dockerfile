@@ -13,7 +13,8 @@ COPY . .
 
 ARG VITE_AUTH_API_URL
 ARG VITE_AUDIT_API_URL
-RUN test -n "$VITE_AUTH_API_URL" && test -n "$VITE_AUDIT_API_URL"
+RUN case "$VITE_AUTH_API_URL" in https://*) ;; *) echo "VITE_AUTH_API_URL must be an HTTPS URL" >&2; exit 1 ;; esac \
+    && case "$VITE_AUDIT_API_URL" in https://*) ;; *) echo "VITE_AUDIT_API_URL must be an HTTPS URL" >&2; exit 1 ;; esac
 ENV VITE_AUTH_API_URL=$VITE_AUTH_API_URL \
     VITE_AUDIT_API_URL=$VITE_AUDIT_API_URL
 RUN bun run build

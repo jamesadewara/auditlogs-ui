@@ -20,10 +20,33 @@ jobs:
       - name: Validate release tag
         shell: bash
         run: |
+          set -euo pipefail
           if [[ ! "$GITHUB_REF_NAME" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
             echo "::error::Release tags must use vMAJOR.MINOR.PATCH."
             exit 1
           fi
+
+      - name: Validate Docker Hub and API URL configuration
+        shell: bash
+        env:
+          DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
+          DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
+          AUTH_API_URL: ${{ vars.AUDITLOGS_UI_AUTH_API_URL }}
+          AUDIT_API_URL: ${{ vars.AUDITLOGS_UI_AUDIT_API_URL }}
+        run: |
+          set -euo pipefail
+          [[ -n "$DOCKERHUB_USERNAME" && -n "$DOCKERHUB_TOKEN" ]] || {
+            echo "::error::Set the DOCKERHUB_USERNAME and DOCKERHUB_TOKEN repository secrets."
+            exit 1
+          }
+          [[ "$AUTH_API_URL" =~ ^https://[^[:space:]]+$ ]] || {
+            echo "::error::Set AUDITLOGS_UI_AUTH_API_URL to the HTTPS base URL for the Auth API."
+            exit 1
+          }
+          [[ "$AUDIT_API_URL" =~ ^https://[^[:space:]]+$ ]] || {
+            echo "::error::Set AUDITLOGS_UI_AUDIT_API_URL to the HTTPS base URL for the Audit API."
+            exit 1
+          }
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
@@ -41,6 +64,7 @@ jobs:
           images: ${{ secrets.DOCKERHUB_USERNAME }}/auditlogs-ui
           tags: |
             type=semver,pattern={{version}}
+            type=raw,value=latest
             type=sha,prefix=sha-
           labels: |
             org.opencontainers.image.title=AuditLogs UI
@@ -63,6 +87,15 @@ jobs:
           cache-to: type=gha,mode=max
           provenance: true
           sbom: true
+
+      - name: Report published image digest
+        shell: bash
+        env:
+          DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
+          IMAGE_DIGEST: ${{ steps.build.outputs.digest }}
+        run: |
+          set -euo pipefail
+          echo "Published image: \`${DOCKERHUB_USERNAME}/auditlogs-ui@${IMAGE_DIGEST}\`" >> "$GITHUB_STEP_SUMMARY"
 
       - name: Scan the published image
         uses: aquasecurity/trivy-action@0.28.0
