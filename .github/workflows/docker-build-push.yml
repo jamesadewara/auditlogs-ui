@@ -1,31 +1,29 @@
-name: Build and Push Docker Image
+name: Build and publish ARM64 image
 
 on:
   push:
-    branches:
-      - main
     tags:
-      - 'v*'
-  workflow_dispatch:
-    inputs:
-      version:
-        description: 'Version tag (e.g., v1.0.0)'
-        required: false
-        type: string
+      - "v*"
+
+permissions:
+  contents: read
+  security-events: write
 
 jobs:
-  build-and-push:
+  build-and-publish:
+    if: startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-latest
-    permissions:
-      contents: read
-      security-events: write
-      packages: write
-
     steps:
-      - name: Checkout code
+      - name: Check out source
         uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
+
+      - name: Validate release tag
+        shell: bash
+        run: |
+          if [[ ! "$GITHUB_REF_NAME" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "::error::Release tags must use vMAJOR.MINOR.PATCH."
+            exit 1
+          fi
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
@@ -33,70 +31,63 @@ jobs:
       - name: Log in to Docker Hub
         uses: docker/login-action@v3
         with:
-          username: ${{ secrets.DOCKER_USERNAME }}
-          password: ${{ secrets.DOCKER_PASSWORD }}
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
 
-      - name: Extract metadata for Docker
+      - name: Generate image metadata
         id: meta
         uses: docker/metadata-action@v5
         with:
-          images: ${{ secrets.DOCKER_USERNAME }}/auditlogs-ui
+          images: ${{ secrets.DOCKERHUB_USERNAME }}/auditlogs-ui
           tags: |
-            type=ref,event=branch
             type=semver,pattern={{version}}
-            type=semver,pattern={{major}}.{{minor}}
-            type=semver,pattern={{major}}
-            type=sha,prefix=
-            type=raw,value=latest,enable={{is_default_branch}}
+            type=sha,prefix=sha-
           labels: |
             org.opencontainers.image.title=AuditLogs UI
-            org.opencontainers.image.description=React/TanStack Start frontend for audit log management
-            org.opencontainers.image.vendor=AuditLogs
-            org.opencontainers.image.licenses=MIT
-            org.opencontainers.image.source=https://github.com/${{ github.repository }}
+            org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
             org.opencontainers.image.revision=${{ github.sha }}
-            org.opencontainers.image.created=${{ github.event.repository.updated_at }}
 
-      - name: Build and push Docker image
+      - name: Build and publish ARM64 image
         id: build
-        uses: docker/build-push-action@v5
+        uses: docker/build-push-action@v6
         with:
           context: .
-          file: ./Dockerfile
           push: true
+          platforms: linux/arm64
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
+          build-args: |
+            VITE_AUTH_API_URL=${{ vars.AUDITLOGS_UI_AUTH_API_URL }}
+            VITE_AUDIT_API_URL=${{ vars.AUDITLOGS_UI_AUDIT_API_URL }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
           provenance: true
           sbom: true
 
-      - name: Run Trivy vulnerability scanner
-        if: success()
-        uses: aquasecurity/trivy-action@master
+      - name: Scan the published image
+        uses: aquasecurity/trivy-action@0.28.0
         with:
-          image-ref: ${{ secrets.DOCKER_USERNAME }}/auditlogs-ui:latest
-          format: 'sarif'
-          output: 'trivy-results.sarif'
-          severity: 'CRITICAL,HIGH'
+          image-ref: ${{ secrets.DOCKERHUB_USERNAME }}/auditlogs-ui@${{ steps.build.outputs.digest }}
+          format: sarif
+          output: trivy-results.sarif
+          severity: CRITICAL,HIGH
+          exit-code: "1"
 
-      - name: Upload Trivy results to GitHub Security
+      - name: Upload scan results
+        if: always() && hashFiles('trivy-results.sarif')
         uses: github/codeql-action/upload-sarif@v4
-        if: success() && hashFiles('trivy-results.sarif')
         with:
-          sarif_file: 'trivy-results.sarif'
+          sarif_file: trivy-results.sarif
 
-      - name: Generate SBOM
-        if: success()
+      - name: Generate image SBOM
         uses: anchore/sbom-action@v0
         with:
-          image: ${{ secrets.DOCKER_USERNAME }}/auditlogs-ui:latest
+          image: ${{ secrets.DOCKERHUB_USERNAME }}/auditlogs-ui@${{ steps.build.outputs.digest }}
           format: spdx-json
           output-file: sbom.spdx.json
 
-      - name: Upload SBOM as artifact
-        if: success() && hashFiles('sbom.spdx.json')
+      - name: Upload image SBOM
         uses: actions/upload-artifact@v4
         with:
-          name: sbom
+          name: auditlogs-ui-sbom
           path: sbom.spdx.json
