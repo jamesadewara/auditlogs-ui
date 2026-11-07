@@ -35,6 +35,19 @@ All configuration is done via environment variables in `.env` file. See `.env.ex
 bun run build
 ```
 
+## Netlify Deployment
+
+Install the TanStack Start adapter and commit the updated `package.json` and `bun.lock`:
+
+```bash
+bun add --dev @netlify/vite-plugin-tanstack-start
+```
+
+Netlify uses `bun run build` and publishes `dist/client`, as configured in `netlify.toml`.
+Set `VITE_AUTH_API_URL` and `VITE_AUDIT_API_URL` in the Netlify environment variables before
+deploying. After the adapter is installed, a successful deployment should serve application
+routes such as `/login` instead of Netlify's static 404 page.
+
 ## Development
 
 ```bash
